@@ -13,3 +13,13 @@ Regole principali: vasca da 25 m, 7 blocchi, stima dei tempi dal test più recen
 Palette no → pull + nuoto normale o pugni chiusi. Progressione dalle ultime 3 sedute
 (+2×50 m / -5" ogni 2 settimane per Emanuele, +50 m ogni 3 settimane con soste fisse a 20" per Beatrice).
 Test nelle settimane 4/8/12 dal 28/10/2026.
+
+## Installarla sul telefono
+
+È una PWA: si installa dal browser e funziona anche offline.
+
+1. Pubblica il repository con GitHub Pages (Settings → Pages → Deploy from a branch, cartella `/ (root)`).
+2. Apri `https://emanuele23698.github.io/sitemap/nuoto/` sul telefono.
+3. iPhone (Safari): Condividi → "Aggiungi alla schermata Home". Android (Chrome): menu ⋮ → "Installa app".
+
+Dopo una modifica ai file, aumenta `VERSIONE` in `sw.js` così il telefono scarica la nuova versione.

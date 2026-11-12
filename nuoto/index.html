@@ -4,7 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b6fa4">
-  <title>Seduta di nuoto</title>
+  <title>Nuoto</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Nuoto">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone/icona.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icone/icona-180.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -26,5 +33,12 @@
 
   <script src="generator.js"></script>
   <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('sw.js');
+    }
+    // chiede al browser di non cancellare i dati salvati (registro)
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  </script>
 </body>
 </html>

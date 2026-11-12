@@ -1,0 +1,16 @@
+{
+  "name": "Nuoto: seduta del giorno",
+  "short_name": "Nuoto",
+  "description": "Genera la seduta di nuoto (vasca o secco) per Emanuele e Beatrice.",
+  "lang": "it",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f7fa",
+  "theme_color": "#0b6fa4",
+  "icons": [
+    { "src": "icone/icona-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icone/icona-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

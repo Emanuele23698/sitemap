@@ -210,7 +210,7 @@
   }
 
   function bloccoSaltato(s) {
-    return (s.blocchi || []).some(function (b) { return !b.completato; });
+    return s.incompleta === true || (s.blocchi || []).some(function (b) { return !b.completato; });
   }
 
   /**
@@ -222,7 +222,9 @@
     if (!prec.length) {
       return { livello: 0, ultimoAumento: data, azione: 'inizio', motivo: 'Prima seduta registrata: livello di partenza.' };
     }
-    var rif = prec[0].progressione || {};
+    // le sedute inserite a mano non hanno un livello: si prende l'ultimo noto
+    var conLivello = prec.filter(function (s) { return s.progressione; })[0];
+    var rif = (conLivello && conLivello.progressione) || {};
     var livello = rif.livello || 0;
     var ultimoAumento = rif.ultimoAumento || prec[prec.length - 1].data;
     var ultime = prec.slice(0, 3);
@@ -268,6 +270,50 @@
     return !storicoProfilo(profilo, storico, data).some(function (s) {
       return settimanaDi(s.data) === sett && (s.blocchi || []).some(function (b) { return b.tipo === 'test' && b.completato; });
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Riflessioni: segnali dal testo libero delle ultime sedute
+  // ---------------------------------------------------------------------------
+  var DOLORE = /dolor|male\b|fastidi|tira|tirav|infiamm|crampi|crampo|indolenz|fitta|bloccat|contrattur/;
+  var SEGNALI = {
+    spalla: { parole: /spall|scapol|cuffia/, problema: DOLORE, testo: 'fastidio alla spalla' },
+    gambe: { parole: /gamb|polpacc|cramp|cosci|cosce|caviglia|piede|piedi/, problema: DOLORE, testo: 'fastidio a gambe/crampi' },
+    ginocchio: { parole: /ginocchi/, problema: DOLORE, testo: 'fastidio al ginocchio' },
+    schiena: { parole: /schiena|lombar|collo|cervical/, problema: DOLORE, testo: 'fastidio a schiena/collo' },
+    respiro: {
+      parole: /affann|fiato|respir|apnea|soffoc|bevut|acqua in bocca/,
+      problema: /affann|fiato corto|senza fiato|soffoc|bevut|acqua in bocca|fatica|difficil|male\b|non riusc|panico|ansia/,
+      testo: 'difficoltà con il respiro'
+    }
+  };
+  var NEGAZIONE = /\b(nessun\w*|niente|senza|non|zero|più)\s+(?:\S+\s+){0,3}?(?:dolor|male\b|fastidi|problem|cramp|affann|fatica)/;
+  var GIORNI_RIFLESSIONE = 10;
+
+  /**
+   * Cerca nelle riflessioni delle ultime sedute (max 3, ultimi 10 giorni) segnali che cambiano la seduta.
+   * Restituisce { segnali: { spalla: '2026-11-10', ... }, fonti: [{ data, segnale, frase }] }.
+   */
+  function analizzaRiflessioni(profilo, storico, data) {
+    var recenti = storicoProfilo(profilo, storico, data).filter(function (s) {
+      return s.riflessione && String(s.riflessione).trim() && giorniTra(s.data, data) <= GIORNI_RIFLESSIONE;
+    }).slice(0, 3);
+    var segnali = {}, fonti = [];
+    recenti.forEach(function (s) {
+      var frasi = String(s.riflessione).toLowerCase().split(/[.!?;\n,]+|\s+ma\s+|\s+però\s+/);
+      frasi.forEach(function (f) {
+        f = f.trim();
+        if (!f || NEGAZIONE.test(f)) return;
+        Object.keys(SEGNALI).forEach(function (k) {
+          var sg = SEGNALI[k];
+          if (sg.parole.test(f) && sg.problema.test(f) && !segnali[k]) {
+            segnali[k] = s.data;
+            fonti.push({ data: s.data, segnale: k, testo: sg.testo, frase: f });
+          }
+        });
+      });
+    });
+    return { segnali: segnali, fonti: fonti };
   }
 
   // ---------------------------------------------------------------------------
@@ -417,7 +463,7 @@
 
     respirazione: function (ctx, budget, rng) {
       var n = n50(budget);
-      var beatrice = ctx.profilo.quotaBaseMax < 1;
+      var beatrice = ctx.profilo.quotaBaseMax < 1 || ctx.segnali.respiro;
       var varianti = beatrice ? [
         { descrizione: 'Respiro ogni 3 bracciate (bilaterale).', nota: 'Espira tutto sott\'acqua con calma, poi gira la testa insieme alla spalla.' },
         { descrizione: '25 respiro ogni 2 sul lato debole + 25 ogni 3.', nota: 'Un occhio sotto e uno sopra l\'acqua quando respiri.' }
@@ -546,6 +592,13 @@
       stileBase = profilo.alternaFocus ? ['resistenza', 'tecnica', 'respirazione'][vasche.length % 3] : 'resistenza';
     }
     var finali = profilo.finaliTecnici || ['crawl'];
+    var rifl = analizzaRiflessioni(profilo, storico, inp.data);
+    var sg = rifl.segnali;
+    var stileFinale = finali[vasche.length % finali.length];
+    if (stileFinale === 'rana' && sg.ginocchio) stileFinale = finali.indexOf('farfalla') >= 0 && !sg.schiena ? 'farfalla' : 'crawl';
+    if (stileFinale === 'farfalla' && (sg.schiena || sg.spalla)) stileFinale = 'crawl';
+    var attrezzi = clona(inp.attrezzi);
+    if (sg.spalla) attrezzi.palette = false;
     var adjEnergia = inp.energia <= 2 ? 5 : 0;
     var livelloRec = Math.floor(Math.max(0, prog.livello) / 2);
     var recBase = Math.max(profilo.recuperoMin, profilo.recuperoBase - livelloRec * (profilo.riduzioneRecupero || 0));
@@ -555,15 +608,17 @@
     return {
       profilo: profilo,
       input: inp,
-      attrezzi: inp.attrezzi,
+      attrezzi: attrezzi,
+      riflessioni: rifl,
+      segnali: sg,
       passoInfo: passoInfo,
       passo: passoInfo.sec100,
       progressione: prog,
       settimana: settimanaDi(inp.data),
       test: inp.tipo === 'vasca' && testDovuto(profilo, storico, inp.data),
       stileBase: stileBase,
-      stileFinale: finali[vasche.length % finali.length],
-      recuperoBase: recBase,
+      stileFinale: stileFinale,
+      recuperoBase: recBase + (sg.respiro && profilo.recuperoMin !== profilo.recuperoBase ? 5 : 0),
       recupero: function (r) { return r + adjEnergia; },
       disponibileSec: inp.durata * 60 - CONFIG.transizioniSec
     };
@@ -580,6 +635,9 @@
     }
     var budget = {};
     Object.keys(q).forEach(function (k) { budget[k] = volume * q[k]; });
+    var sg = ctx.segnali || {};
+    if (sg.spalla) { var dp = budget.pull * 0.4; budget.pull -= dp; budget[sg.gambe ? 'riscaldamento' : 'gambe'] += dp; }
+    if (sg.gambe || sg.ginocchio) { var dg = budget.gambe * 0.5; budget.gambe -= dg; budget.respirazione += dg; }
     var L = ctx.progressione.livello;
     var extraProg = L > 0 ? Math.ceil(L / 2) * p.passoProgressioneMetri : L * 50;
     budget.base = Math.max(100, budget.base + extraProg);
@@ -653,6 +711,16 @@
     ]
   };
 
+  var ESCLUSI_SECCO = {
+    spalla: ['Push-up (sulle ginocchia se serve)', 'Burpee', 'Mountain climber', 'Plank laterale'],
+    gambe: ['Squat jump', 'Jumping jack', 'Affondi alternati'],
+    ginocchio: ['Squat jump', 'Affondi alternati', 'Burpee', 'Jumping jack'],
+    schiena: ['Superman (estensioni dorsali)', 'Hollow hold', 'Flutter kick supino (gambe a forbice)']
+  };
+  function escluso(ctx, nome) {
+    var sg = ctx.segnali || {};
+    return Object.keys(sg).some(function (k) { return (ESCLUSI_SECCO[k] || []).indexOf(nome) >= 0; });
+  }
   function mescola(rng, arr) {
     var a = arr.slice();
     for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rng() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
@@ -673,7 +741,9 @@
     },
     circuito: function (ctx, rng, opz) {
       var liv = ctx.livelloSecco, nEs = (opz && opz.nEs) || { 30: 5, 45: 6, 60: 7 }[ctx.input.durata];
-      var pool = SECCO.forza.filter(function (e) { return !e.minEnergia || ctx.input.energia >= e.minEnergia; });
+      var pool = SECCO.forza.filter(function (e) {
+        return (!e.minEnergia || ctx.input.energia >= e.minEnergia) && !escluso(ctx, e.nome);
+      });
       var es = mescola(rng, pool).slice(0, nEs).map(function (e) { return esercizio(e, liv); });
       return {
         titolo: 'Circuito', giri: (opz && opz.giri) || 3, rec: ctx.input.energia <= 2 ? 90 : 60, recEsercizi: 15, esercizi: es,
@@ -681,7 +751,7 @@
       };
     },
     core: function (ctx, rng) {
-      var es = mescola(rng, SECCO.core).slice(0, 3).map(function (e) { return esercizio(e, ctx.livelloSecco); });
+      var es = mescola(rng, SECCO.core.filter(function (e) { return !escluso(ctx, e.nome); })).slice(0, 3).map(function (e) { return esercizio(e, ctx.livelloSecco); });
       return {
         titolo: 'Core', giri: ctx.input.durata >= 45 ? 3 : 2, rec: 30, recEsercizi: 10, esercizi: es,
         nota: 'Schiena neutra, ombelico verso la colonna: è la base della posizione in acqua.'
@@ -759,6 +829,26 @@
       if (ctx.stileBase !== inp.focus) note.push('Focus misto: oggi base orientata a ' + ctx.stileBase + '.');
     }
     if (inp.energia <= 2) note.push('Energia bassa: volumi ridotti e recuperi più lunghi.');
+    var EFFETTI = {
+      vasca: {
+        spalla: 'niente palette, pull ridotto, niente farfalla',
+        gambe: 'blocco gambe dimezzato',
+        ginocchio: 'blocco gambe dimezzato, niente rana',
+        schiena: 'niente farfalla nel finale',
+        respiro: 'respirazione graduale (no ipossica), recuperi un po\' più lunghi'
+      },
+      secco: {
+        spalla: 'niente push-up, burpee, mountain climber, plank laterale',
+        gambe: 'niente salti e affondi',
+        ginocchio: 'niente salti e affondi',
+        schiena: 'niente superman, hollow hold, flutter kick',
+        respiro: 'nessuna modifica: lavora sull\'espirazione lenta durante lo stretching'
+      }
+    };
+    ctx.riflessioni.fonti.forEach(function (f) {
+      var dd = f.data.split('-');
+      note.push('Dalla riflessione del ' + dd[2] + '/' + dd[1] + ' (' + f.testo + '): ' + EFFETTI[inp.tipo][f.segnale] + '.');
+    });
 
     var seduta = {
       versione: 1,
@@ -827,6 +917,108 @@
     return ricalcola(s);
   }
 
+  /** "4x100 crawl rec 20" -> { serie, rec, descrizione }; null se la riga non inizia con una serie valida */
+  function leggiRigaBlocco(riga) {
+    var m = String(riga).trim().match(/^([0-9][0-9\s×xX*+\-]*?)(?:\s+([^0-9\s].*))?$/);
+    if (!m) return null;
+    var serie = leggiSerie(m[1].trim());
+    if (!serie || serie.some(function (d) { return d % CONFIG.vasca !== 0; })) return null;
+    var resto = (m[2] || '').trim();
+    var r = resto.match(/rec(?:upero)?\.?\s*(\d+)/i);
+    var desc = resto.replace(/,?\s*rec(?:upero)?\.?\s*\d+\s*["”″s]?/i, '').trim();
+    return { serie: serie, rec: r ? Number(r[1]) : 0, descrizione: desc };
+  }
+
+  /**
+   * Crea una seduta "già fatta" da inserire nel Registro (non generata dall'app).
+   * dati: { data, tipo, durata (min), energia?, fatica, focus?, metri?, completata (bool),
+   *         tempoTest? ('mm:ss'), blocchi? (testo, una riga per blocco: "4x100 crawl rec 20"),
+   *         riflessione?, creataIl? }
+   * Restituisce { seduta, errori }.
+   */
+  function creaSedutaManuale(profilo, dati, storico) {
+    dati = dati || {};
+    var errori = [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dati.data || '')) errori.push('Data non valida.');
+    var durata = Math.round(Number(dati.durata));
+    if (!(durata >= 5 && durata <= 300)) errori.push('Durata non valida (minuti).');
+    var fatica = Math.round(Number(dati.fatica));
+    if (!(fatica >= 1 && fatica <= 5)) errori.push('Indica la fatica (1-5).');
+    var tipo = dati.tipo === 'secco' ? 'secco' : 'vasca';
+    var righe = String(dati.blocchi || '').split('\n').map(function (r) { return r.trim(); }).filter(Boolean);
+    var blocchi = [], note = [];
+
+    if (tipo === 'vasca') {
+      righe.forEach(function (r) {
+        var b = leggiRigaBlocco(r);
+        if (!b) { note.push(r); return; }
+        blocchi.push({
+          id: 'blocco-' + blocchi.length, tipo: 'libero',
+          titolo: b.descrizione ? b.descrizione.charAt(0).toUpperCase() + b.descrizione.slice(1) : 'Blocco ' + (blocchi.length + 1),
+          serie: b.serie, rec: b.rec, descrizione: b.descrizione, nota: '', attrezzi: [], completato: true, tempo: ''
+        });
+      });
+      if (!blocchi.length) {
+        var metri = Math.round(Number(dati.metri) / CONFIG.vasca) * CONFIG.vasca;
+        if (metri > 0) {
+          blocchi.push({
+            id: 'blocco-0', tipo: 'libero', titolo: 'Seduta libera', serie: [metri], rec: 0,
+            descrizione: note.length ? note.join('; ') : '', nota: '', attrezzi: [], completato: true, tempo: ''
+          });
+          note = [];
+        }
+      }
+      var t = dati.tempoTest != null && dati.tempoTest !== '' ? leggiTempo(dati.tempoTest) : null;
+      if (dati.tempoTest && !t) errori.push('Tempo del test non valido (usa mm:ss).');
+      if (t) {
+        blocchi.push({
+          id: 'test-' + blocchi.length, tipo: 'test', titolo: 'Test ' + profilo.test.distanza + ' m',
+          serie: [profilo.test.distanza], rec: 0, descrizione: 'Test a tempo', nota: '', attrezzi: [],
+          completato: true, tempo: formattaTempo(t), tempoSec: t, fisso: true
+        });
+      }
+      if (!blocchi.length) errori.push('Indica i metri totali, almeno un blocco (es. "4x100 crawl rec 20") o il tempo del test.');
+    } else {
+      var es = righe.map(function (r) {
+        var p = r.split('|');
+        return { nome: p[0].trim(), dose: (p[1] || '').trim(), sec: 0 };
+      });
+      if (!es.length) es = [{ nome: 'Allenamento a secco', dose: durata + '′', sec: 0 }];
+      blocchi.push({
+        id: 'secco-0', tipo: 'libero', titolo: 'Secco', giri: 1, rec: 0, recEsercizi: 0, esercizi: es,
+        descrizione: '', nota: '', completato: true, tempo: '', metri: 0
+      });
+    }
+    if (errori.length) return { seduta: null, errori: errori };
+
+    blocchi.forEach(function (b) { if (!b.esercizi) b.metri = somma(b.serie); b.stimaSec = 0; });
+    var seduta = {
+      versione: 1,
+      id: profilo.id + '-' + dati.data + '-m' + hash(JSON.stringify(dati)).toString(36),
+      origine: 'manuale',
+      profiloId: profilo.id,
+      data: dati.data,
+      tipo: tipo,
+      durata: durata,
+      energia: clamp(Math.round(Number(dati.energia) || 3), 1, 5),
+      fatica: fatica,
+      focus: ['tecnica', 'resistenza', 'respirazione', 'misto'].indexOf(dati.focus) >= 0 ? dati.focus : 'misto',
+      attrezzi: null,
+      settimana: settimanaDi(dati.data),
+      passo100: Math.round(passoRiferimento(profilo, storico, dati.data).sec100),
+      progressione: null,
+      test: blocchi.some(function (b) { return b.tipo === 'test'; }),
+      incompleta: dati.completata === false,
+      blocchi: blocchi,
+      note: note,
+      riflessione: String(dati.riflessione || '').trim(),
+      totaleMetri: somma(blocchi.map(function (b) { return b.metri || 0; })),
+      stimaSec: durata * 60,
+      stato: 'completata'
+    };
+    return { seduta: seduta, errori: [] };
+  }
+
   /** Controlla che una seduta abbia il formato atteso (utile anche per sedute importate o generate altrove). */
   function validaSeduta(s) {
     var errori = [];
@@ -835,7 +1027,8 @@
     if (!s.profiloId) err('profiloId mancante');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s.data || '')) err('data non valida');
     if (['vasca', 'secco'].indexOf(s.tipo) < 0) err('tipo non valido');
-    if ([30, 45, 60].indexOf(s.durata) < 0) err('durata non valida');
+    if (s.origine === 'manuale') { if (!(s.durata >= 5 && s.durata <= 300)) err('durata non valida'); }
+    else if ([30, 45, 60].indexOf(s.durata) < 0) err('durata non valida');
     if (!Array.isArray(s.blocchi) || !s.blocchi.length) err('blocchi mancanti');
     (s.blocchi || []).forEach(function (b, i) {
       var p = 'blocco ' + (i + 1) + ': ';
@@ -860,6 +1053,9 @@
     rigeneraBlocco: rigeneraBlocco,
     ricalcola: ricalcola,
     validaSeduta: validaSeduta,
+    creaSedutaManuale: creaSedutaManuale,
+    analizzaRiflessioni: analizzaRiflessioni,
+    leggiRigaBlocco: leggiRigaBlocco,
     // utilità esposte per l'interfaccia e i test
     passoRiferimento: passoRiferimento,
     calcolaProgressione: calcolaProgressione,

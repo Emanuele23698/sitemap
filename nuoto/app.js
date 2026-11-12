@@ -28,7 +28,11 @@
     };
   }
   var stato = carica();
-  var ui = { modifica: null, data: oggi(), apri: {} };
+  var ui = { modifica: null, data: oggi(), apri: {}, manuale: null };
+  function manualeDefault() {
+    return { data: oggi(), tipo: 'vasca', durata: '45', energia: 3, fatica: null, focus: 'misto', metri: '',
+      completata: 'si', tempoTest: '', blocchi: '', riflessione: '' };
+  }
 
   function salva() {
     try { localStorage.setItem(CHIAVE, JSON.stringify(stato)); }
@@ -87,7 +91,10 @@
     h += '<div class="info"><b>Settimana ' + sett + '</b>' +
       (prossimoTest ? (prossimoTest === sett ? ' · <b>settimana di test</b>' : ' · test in settimana ' + prossimoTest) : '') +
       '<ul><li>Passo ' + G.formattaTempo(passo.sec100) + '/100 m — ' + esc(passo.fonte) + '</li>' +
-      (inp.tipo === 'vasca' ? '<li>' + esc(prog.motivo) + '</li>' : '') + '</ul></div>';
+      (inp.tipo === 'vasca' ? '<li>' + esc(prog.motivo) + '</li>' : '') +
+      G.analizzaRiflessioni(p, stato.registro, ui.data).fonti.map(function (f) {
+        return '<li>Riflessione del ' + dataIt(f.data).slice(0, 5) + ': ' + esc(f.testo) + ' → seduta adattata</li>';
+      }).join('') + '</ul></div>';
 
     if (corrente()) {
       h += '<p class="muted small">C\'è già una seduta in corso: generandone una nuova verrà sostituita.</p>';
@@ -163,6 +170,9 @@
       h += '</section>';
     });
 
+    h += '<div class="field fatica"><label for="rifl">Riflessione <span class="muted">(opzionale)</span></label>' +
+      '<textarea id="rifl" data-rifl placeholder="Com\'è andata? Sensazioni, fastidi (es. spalla, crampi), respiro, cosa migliorare…">' + esc(s.riflessione) + '</textarea>' +
+      '<p class="muted small">Se segnali fastidi (spalla, gambe, ginocchio, schiena) o problemi di respiro, le prossime sedute si adattano.</p></div>';
     h += '<div class="field fatica"><span class="label">Fatica a fine seduta (1 = facile, 5 = al limite)</span>' + seg('fatica', [1, 2, 3, 4, 5], s.fatica || '') + '</div>';
     h += '<button class="btn primary big" data-action="registra">Salva nel registro</button>';
     h += '<div class="row" style="margin-top:10px"><button class="btn grow" data-action="rigenera-tutto">Rigenera tutta</button>' +
@@ -177,6 +187,8 @@
     var passo = G.passoRiferimento(p, stato.registro, oggi());
     var prog = G.calcolaProgressione(p, stato.registro, oggi());
     var h = '<h1>Registro · ' + esc(p.nome) + '</h1>';
+    if (ui.manuale) return h + formManuale();
+    h += '<button class="btn big" data-action="nuova-manuale" style="margin-bottom:16px">+ Aggiungi seduta già fatta</button>';
     h += '<div class="info">Passo ' + G.formattaTempo(passo.sec100) + '/100 m — ' + esc(passo.fonte) +
       '<br>Livello progressione: ' + prog.livello + ' — ' + esc(prog.motivo) + '</div>';
     if (!lista.length) return h + '<p class="empty">Ancora nessuna seduta registrata.</p>';
@@ -190,16 +202,76 @@
         (s.tipo === 'vasca' ? metriFatti + ' / ' + s.totaleMetri + ' m · ' : '') +
         fatti.length + '/' + s.blocchi.length + ' blocchi' +
         (test ? ' · <b>test ' + G.formattaTempo(test.tempoSec) + '</b>' : '') +
-        ' · energia ' + s.energia + ' · ' + esc(s.focus) + '</div></summary><div class="body"><ul>' +
+        ' · energia ' + s.energia + (s.origine === 'manuale' ? '' : ' · ' + esc(s.focus)) +
+        (s.origine === 'manuale' ? ' · <span class="tag" style="margin:0">inserita a mano</span>' : '') +
+        (s.incompleta ? ' · non completata' : '') +
+        (s.riflessione ? '<div class="rifl-anteprima">“' + esc(s.riflessione.length > 90 ? s.riflessione.slice(0, 90) + '…' : s.riflessione) + '”</div>' : '') +
+        '</div></summary><div class="body"><ul>' +
         s.blocchi.map(function (b) {
           var det = s.tipo === 'vasca' ? G.formattaSerie(b.serie) + (b.rec ? ' rec ' + b.rec + '″' : '')
             : b.giri + '× ' + b.esercizi.map(function (e) { return e.nome; }).join(', ');
           return '<li>' + (b.completato ? '✓ ' : '✗ ') + '<b>' + esc(b.titolo) + '</b> ' + esc(det) +
             (b.tempo ? ' — <i>' + esc(b.tempo) + '</i>' : '') + '</li>';
         }).join('') + '</ul>' +
+        ((s.note || []).length && s.origine === 'manuale' ? '<p class="muted">' + esc(s.note.join(' · ')) + '</p>' : '') +
+        '<div class="field"><label>Riflessione</label><textarea data-rifl-reg="' + esc(s.id) + '" placeholder="Aggiungi una riflessione…">' + esc(s.riflessione) + '</textarea></div>' +
+        '<div class="field"><span class="label">Fatica</span><div class="seg">' + [1, 2, 3, 4, 5].map(function (n) {
+          return '<button data-action="fatica-reg" data-id="' + esc(s.id) + '" data-val="' + n + '" aria-pressed="' + (s.fatica === n) + '">' + n + '</button>';
+        }).join('') + '</div></div>' +
         '<button class="btn small danger" data-action="elimina" data-id="' + esc(s.id) + '">Elimina</button></div></details>';
     });
     return h;
+  }
+
+  function mseg(key, opzioni, valore) {
+    return '<div class="seg">' + opzioni.map(function (o) {
+      var v = Array.isArray(o) ? o[0] : o, l = Array.isArray(o) ? o[1] : o;
+      return '<button data-action="mset" data-key="' + key + '" data-val="' + esc(v) + '" aria-pressed="' + (String(valore) === String(v)) + '">' + esc(l) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function formManuale() {
+    var m = ui.manuale, p = profilo();
+    var h = '<p class="muted">Registra una seduta fatta senza l\'app: conta per progressione, passo, settimane di test e riflessioni.</p>';
+    h += '<div class="row"><div class="field grow"><label for="m-data">Data</label><input type="date" id="m-data" data-m="data" value="' + esc(m.data) + '"></div>' +
+      '<div class="field grow"><label for="m-durata">Durata (min)</label><input type="number" id="m-durata" data-m="durata" min="5" max="300" inputmode="numeric" value="' + esc(m.durata) + '"></div></div>';
+    h += '<div class="field"><span class="label">Tipo</span>' + mseg('tipo', [['vasca', 'Vasca'], ['secco', 'Secco']], m.tipo) + '</div>';
+    if (m.tipo === 'vasca') {
+      h += '<div class="row"><div class="field grow"><label for="m-metri">Metri totali</label><input type="number" id="m-metri" data-m="metri" min="0" step="25" inputmode="numeric" placeholder="es. 1500" value="' + esc(m.metri) + '"></div>' +
+        '<div class="field grow"><label for="m-test">Test ' + p.test.distanza + ' m <span class="muted">(se fatto)</span></label><input type="text" id="m-test" data-m="tempoTest" inputmode="decimal" placeholder="mm:ss" value="' + esc(m.tempoTest) + '"></div></div>';
+      h += '<div class="field"><label for="m-blocchi">Blocchi <span class="muted">(opzionale, uno per riga)</span></label>' +
+        '<textarea id="m-blocchi" data-m="blocchi" rows="5" placeholder="300 riscaldamento\n6x100 crawl rec 20\n4x50 pull rec 15\n8x25 veloci rec 30">' + esc(m.blocchi) + '</textarea>' +
+        '<p class="muted small">Se scrivi i blocchi, i metri si calcolano da lì.</p></div>';
+      h += '<div class="field"><span class="label">Focus</span>' + mseg('focus', FOCUS, m.focus) + '</div>';
+    } else {
+      h += '<div class="field"><label for="m-blocchi">Esercizi <span class="muted">(opzionale: nome | dose)</span></label>' +
+        '<textarea id="m-blocchi" data-m="blocchi" rows="4" placeholder="Squat | 3x15\nPlank | 3x30&quot;">' + esc(m.blocchi) + '</textarea></div>';
+    }
+    h += '<div class="field"><span class="label">Hai completato tutto?</span>' + mseg('completata', [['si', 'Sì'], ['no', 'No, ho saltato qualcosa']], m.completata) + '</div>';
+    h += '<div class="field"><span class="label">Energia prima</span>' + mseg('energia', [1, 2, 3, 4, 5], m.energia) + '</div>';
+    h += '<div class="field"><span class="label">Fatica a fine seduta</span>' + mseg('fatica', [1, 2, 3, 4, 5], m.fatica) + '</div>';
+    h += '<div class="field"><label for="m-rifl">Riflessione <span class="muted">(opzionale)</span></label>' +
+      '<textarea id="m-rifl" data-m="riflessione" placeholder="Com\'è andata? Fastidi, respiro, sensazioni…">' + esc(m.riflessione) + '</textarea></div>';
+    h += '<button class="btn primary big" data-action="salva-manuale">Salva nel registro</button>' +
+      '<button class="btn big" style="margin-top:8px" data-action="annulla-manuale">Annulla</button>';
+    return h;
+  }
+
+  function salvaManuale() {
+    var m = ui.manuale;
+    var r = G.creaSedutaManuale(profilo(), {
+      data: m.data, tipo: m.tipo, durata: m.durata, energia: m.energia, fatica: m.fatica, focus: m.focus,
+      metri: m.metri, tempoTest: m.tipo === 'vasca' ? m.tempoTest : '', blocchi: m.blocchi,
+      completata: m.completata !== 'no', riflessione: m.riflessione, creataIl: new Date().toISOString()
+    }, stato.registro);
+    if (r.errori.length) { alert(r.errori.join('\n')); return false; }
+    var sed = r.seduta;
+    if (sed.note.length && sed.tipo === 'vasca' &&
+      !confirm('Queste righe non sono state riconosciute come blocchi e verranno salvate come note:\n' + sed.note.join('\n') + '\n\nSalvo comunque?')) return false;
+    sed.completataIl = new Date().toISOString();
+    stato.registro.push(sed);
+    ui.manuale = null;
+    return true;
   }
 
   function vistaImpostazioni() {
@@ -333,8 +405,8 @@
     if (!el) return;
     var a = el.dataset.action, v = el.dataset.val, i = el.dataset.i != null ? Number(el.dataset.i) : null;
     switch (a) {
-      case 'profilo': stato.profilo = v; ui.modifica = null; break;
-      case 'vista': stato.vista = v; ui.modifica = null; break;
+      case 'profilo': stato.profilo = v; ui.modifica = null; ui.manuale = null; break;
+      case 'vista': stato.vista = v; ui.modifica = null; ui.manuale = null; break;
       case 'set':
         if (el.dataset.key === 'fatica') { aggiornaCorrente(function (s) { s.fatica = Number(v); }); break; }
         input()[el.dataset.key] = ['durata', 'energia'].indexOf(el.dataset.key) >= 0 ? Number(v) : v;
@@ -359,6 +431,14 @@
         setCorrente(G.rigeneraBlocco(profilo(), corrente(), i, stato.registro, nuovoSeed()));
         break;
       case 'registra': registra(); break;
+      case 'nuova-manuale': ui.manuale = manualeDefault(); window.scrollTo(0, 0); break;
+      case 'annulla-manuale': ui.manuale = null; break;
+      case 'mset': ui.manuale[el.dataset.key] = ['energia', 'fatica'].indexOf(el.dataset.key) >= 0 ? Number(v) : v; break;
+      case 'salva-manuale': if (salvaManuale()) window.scrollTo(0, 0); break;
+      case 'fatica-reg':
+        stato.registro.forEach(function (s) { if (s.id === el.dataset.id) s.fatica = Number(v); });
+        ui.apri[el.dataset.id] = true;
+        break;
       case 'elimina':
         if (!confirm('Eliminare questa seduta dal registro?')) return;
         stato.registro = stato.registro.filter(function (s) { return s.id !== el.dataset.id; });
@@ -389,6 +469,18 @@
         }
       });
       render();
+    }
+  });
+
+  document.addEventListener('input', function (ev) {
+    var el = ev.target;
+    if (el.dataset.m != null && ui.manuale) ui.manuale[el.dataset.m] = el.value;
+    if (el.dataset.rifl != null && corrente()) {
+      var s = corrente(); s.riflessione = el.value; salva();
+    }
+    if (el.dataset.riflReg != null) {
+      stato.registro.forEach(function (s) { if (s.id === el.dataset.riflReg) s.riflessione = el.value; });
+      salva();
     }
   });
 

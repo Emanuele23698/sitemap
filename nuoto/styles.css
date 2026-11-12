@@ -138,3 +138,4 @@ textarea { min-height: 70px; resize: vertical; }
 .log .body ul { padding-left: 18px; margin: 6px 0; }
 .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 .fatica { margin: 18px 0 8px; }
+.rifl-anteprima { margin-top: 4px; font-style: italic; }

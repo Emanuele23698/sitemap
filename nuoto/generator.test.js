@@ -163,4 +163,70 @@ test('serie e tempi: parsing e formattazione', () => {
   assert.equal(G.leggiTempo('x'), null);
 });
 
+test('seduta manuale: metri, blocchi, test e validazione', () => {
+  const p = PROFILI.emanuele;
+  let r = G.creaSedutaManuale(p, { data: '2026-11-05', tipo: 'vasca', durata: 50, fatica: 3, metri: 1610, completata: true }, []);
+  assert.deepEqual(r.errori, []);
+  assert.equal(r.seduta.totaleMetri, 1600);
+  assert.ok(G.validaSeduta(r.seduta).ok, G.validaSeduta(r.seduta).errori.join());
+  r = G.creaSedutaManuale(p, { data: '2026-11-05', tipo: 'vasca', durata: 45, fatica: 2,
+    blocchi: '300 riscaldamento\n4x100 crawl rec 20\n8x25 veloci rec 30"\nchiacchiere', completata: true }, []);
+  assert.equal(r.seduta.blocchi.length, 3);
+  assert.deepEqual(r.seduta.blocchi[1].serie, [100, 100, 100, 100]);
+  assert.equal(r.seduta.blocchi[1].rec, 20);
+  assert.equal(r.seduta.blocchi[2].rec, 30);
+  assert.equal(r.seduta.totaleMetri, 900);
+  assert.deepEqual(r.seduta.note, ['chiacchiere']);
+  assert.ok(G.creaSedutaManuale(p, { data: '2026-11-05', durata: 45 }, []).errori.length >= 2);
+  const sec = G.creaSedutaManuale(p, { data: '2026-11-05', tipo: 'secco', durata: 20, fatica: 2 }, []).seduta;
+  assert.ok(G.validaSeduta(sec).ok);
+  // test inserito a mano: aggiorna il passo e chiude la settimana di test
+  const t = G.creaSedutaManuale(p, { data: '2026-11-18', tipo: 'vasca', durata: 40, fatica: 4, metri: 1000, tempoTest: '8:40' }, []).seduta;
+  const dopo = G.generaSeduta(p, Object.assign({}, base, { data: '2026-11-20' }), [t]);
+  assert.equal(dopo.passo100, 130);
+  assert.notEqual(dopo.blocchi[1].tipo, 'test');
+});
+
+test('sedute manuali nella progressione (incompleta = saltata, livello mantenuto)', () => {
+  const p = PROFILI.emanuele;
+  const s1 = registrata('emanuele', '2026-10-28', 3);
+  const s2 = registrata('emanuele', '2026-11-04', 2, { storico: [s1] });
+  const s3 = registrata('emanuele', '2026-11-10', 3, { storico: [s1, s2] });
+  s3.progressione = { livello: 2, ultimoAumento: '2026-11-01' };
+  const m = (data, fatica, completata) => G.creaSedutaManuale(p, { data, tipo: 'vasca', durata: 45, fatica, metri: 1400, completata }, []).seduta;
+  const ok = G.calcolaProgressione(p, [s1, s2, s3, m('2026-11-12', 2, true)], '2026-11-13');
+  assert.equal(ok.livello, 2);
+  assert.equal(ok.azione, 'mantieni');
+  const no = G.calcolaProgressione(p, [s1, s2, s3, m('2026-11-12', 3, false)], '2026-11-13');
+  assert.equal(no.azione, 'mantieni');
+  assert.match(no.motivo, /pesante/);
+});
+
+test('riflessioni: segnali, negazioni ed effetti sulla seduta', () => {
+  const p = PROFILI.emanuele;
+  const conRifl = (testo, data = '2026-11-10') => {
+    const s = registrata('emanuele', data, 3); s.riflessione = testo; return s;
+  };
+  const a = (t) => Object.keys(G.analizzaRiflessioni(p, [conRifl(t)], '2026-11-12').segnali).sort();
+  assert.deepEqual(a('Mi faceva male la spalla destra nel pull.'), ['spalla']);
+  assert.deepEqual(a('Nessun dolore alla spalla, tutto bene.'), []);
+  assert.deepEqual(a('Crampi al polpaccio, e avevo il fiato corto'), ['gambe', 'respiro']);
+  assert.deepEqual(a('Respirazione ok, mi sono divertito'), []);
+  assert.deepEqual(a('Ginocchio dolorante a rana'), ['ginocchio']);
+  // riflessione vecchia (> 10 giorni) ignorata
+  assert.deepEqual(Object.keys(G.analizzaRiflessioni(p, [conRifl('male alla spalla', '2026-10-28')], '2026-11-12').segnali), []);
+
+  const storico = [conRifl('Fastidio alla spalla sinistra')];
+  for (let seed = 0; seed < 8; seed++) {
+    const s = G.generaSeduta(p, Object.assign({}, base, { seed, durata: 60, attrezzi: { palette: true } }), storico);
+    assert.ok(s.blocchi.every(b => !(b.attrezzi || []).includes('palette')));
+    assert.ok(s.note.some(n => /riflessione del 10\/11/.test(n)));
+    const sec = G.generaSeduta(p, Object.assign({}, base, { seed, tipo: 'secco', energia: 5 }), storico);
+    assert.ok(sec.blocchi.every(b => b.esercizi.every(e => !/Push-up|Burpee/.test(e.nome))));
+  }
+  const senza = G.generaSeduta(p, Object.assign({}, base, { durata: 60 }), [registrata('emanuele', '2026-11-10', 3)]);
+  const con = G.generaSeduta(p, Object.assign({}, base, { durata: 60 }), storico);
+  assert.ok(con.blocchi[2].metri < senza.blocchi[2].metri, 'pull ridotto');
+});
+
 console.log(`\n${passati} test passati`);

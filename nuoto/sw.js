@@ -1,6 +1,6 @@
 // Service worker: rende l'app disponibile offline (anche in piscina senza rete).
 // Quando modifichi i file dell'app, aumenta VERSIONE per far scaricare la nuova versione.
-const VERSIONE = 'nuoto-v1';
+const VERSIONE = 'nuoto-v2';
 const FILE = [
   './', './index.html', './styles.css', './generator.js', './app.js', './manifest.webmanifest',
   './icone/icona-180.png', './icone/icona-192.png', './icone/icona-512.png'

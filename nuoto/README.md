@@ -14,6 +14,14 @@ Palette no → pull + nuoto normale o pugni chiusi. Progressione dalle ultime 3 
 (+2×50 m / -5" ogni 2 settimane per Emanuele, +50 m ogni 3 settimane con soste fisse a 20" per Beatrice).
 Test nelle settimane 4/8/12 dal 28/10/2026.
 
+**Sedute inserite a mano** (Registro → "Aggiungi seduta già fatta", `creaSedutaManuale`): contano per progressione
+(fatica, completata sì/no), passo (se c'è il tempo del test) e settimane di test.
+
+**Riflessioni** (opzionali, a fine seduta o dal Registro, `analizzaRiflessioni`): nelle riflessioni degli ultimi 10 giorni
+il generatore cerca fastidi a spalla, gambe/crampi, ginocchio, schiena/collo e difficoltà di respiro (ignorando frasi negate
+come "nessun dolore") e adatta la seduta: niente palette e pull ridotto, gambe dimezzate, niente rana/farfalla,
+respirazione graduale, esercizi a secco esclusi. Ogni adattamento è spiegato nelle note della seduta.
+
 ## Installarla sul telefono
 
 È una PWA: si installa dal browser e funziona anche offline.
